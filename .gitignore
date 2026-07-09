@@ -7,6 +7,9 @@ __pycache__/
 curabot.db
 qdrant_db/
 static/uploads/
+.deepeval/
+research/eval/*_log*.txt
+research/eval/results.json
 
 # C extensions
 *.so

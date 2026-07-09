@@ -1,0 +1,19 @@
+[Unit]
+Description=CuraBot Flask app (waitress)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=curabot
+WorkingDirectory=/opt/curabot
+Environment=FLASK_ENV=production
+EnvironmentFile=/opt/curabot/.env
+ExecStart=/opt/curabot/venv/bin/python /opt/curabot/app.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/curabot/stdout.log
+StandardError=append:/var/log/curabot/stderr.log
+
+[Install]
+WantedBy=multi-user.target

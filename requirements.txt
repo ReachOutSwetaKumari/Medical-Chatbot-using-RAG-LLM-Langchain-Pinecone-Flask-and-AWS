@@ -16,4 +16,5 @@ Pillow
 easyocr
 pymupdf
 requests
+waitress
 -e .

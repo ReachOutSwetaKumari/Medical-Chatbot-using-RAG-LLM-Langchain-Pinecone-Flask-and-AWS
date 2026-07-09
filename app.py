@@ -1,5 +1,6 @@
 import os
 import sys
+import secrets
 import datetime
 import sqlite3
 import threading
@@ -38,6 +39,8 @@ _file_handler = RotatingFileHandler(_log_file, maxBytes=5 * 1024 * 1024, backupC
 _file_handler.setFormatter(_log_fmt)
 _file_handler.setLevel(logging.DEBUG)
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 _console_handler = logging.StreamHandler(sys.stdout)
 _console_handler.setFormatter(_log_fmt)
 _console_handler.setLevel(logging.INFO)
@@ -57,8 +60,13 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 template_dir = os.path.join(base_dir, 'templates')
 
 app = Flask(__name__, template_folder=template_dir)
-# IMPORTANT: Change this fallback key in production or set it in .env
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "curabot-super-fallback-key-999")
+app.secret_key = os.environ["FLASK_SECRET_KEY"]
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("FLASK_ENV") == "production",
+)
 
 # 2. FILE UPLOAD CONFIGURATION
 UPLOAD_FOLDER = os.path.join(base_dir, 'static', 'uploads')
@@ -245,13 +253,19 @@ def init_db():
         )
     ''')
 
-    # SEED TEST USER (If users space is completely empty)
+    # SEED ADMIN ACCOUNT (only if users table is completely empty)
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
-        # Sets default account: admin@curabot.com / password123
-        hashed_pw = generate_password_hash("password123")
+        seed_password = os.getenv("ADMIN_SEED_PASSWORD")
+        if not seed_password:
+            seed_password = secrets.token_urlsafe(12)
+            logger.warning(
+                "ADMIN_SEED_PASSWORD not set — generated a random admin password. "
+                "Login: admin@curabot.com / %s  (save this now, it will not be shown again)",
+                seed_password,
+            )
+        hashed_pw = generate_password_hash(seed_password)
         c.execute("INSERT INTO users (email, password) VALUES (?, ?)", ("admin@curabot.com", hashed_pw))
-        logger.info("Seeded default admin account: admin@curabot.com / password123")
 
     conn.commit()
     conn.close()
@@ -433,7 +447,8 @@ system_prompt = (
     "1. Validate feelings first: When a user mentions a symptom, start by empathetically acknowledging how they feel.\n"
     "2. Strict answer scope: ONLY answer what the user is explicitly asking. Do not dump unrequested lists.\n"
     "3. Prescription context: If a prescription or document is referenced, acknowledge it warmly and interpret the user's question around it.\n"
-    "4. Cite sources: When answering from medical knowledge, mention the relevant source book where appropriate.\n"
+    "4. No source citations: Never mention book names, chapter numbers, page numbers, or any 'Source:' line in your answer. "
+    "Use the retrieved context only to inform your answer, never reference where it came from.\n"
     "5. Formatting: Use point-wise, scannable responses. No raw markdown symbols like ## or **.\n"
     "6. Safety: Never diagnose definitively. Always recommend consulting a doctor for serious concerns.\n"
     "7. Confidence note: If the retrieved context doesn't clearly address the question, honestly say so.\n\n"
@@ -1429,4 +1444,9 @@ if __name__ == "__main__":
     logger.info("CuraBot server starting on http://0.0.0.0:8080")
     logger.info("Log file: %s", _log_file)
     logger.info("=" * 60)
-    app.run(host="0.0.0.0", port=8080, debug=True, use_reloader=False)
+
+    if os.getenv("FLASK_ENV") == "production":
+        from waitress import serve
+        serve(app, host="0.0.0.0", port=8080, threads=8)
+    else:
+        app.run(host="0.0.0.0", port=8080, debug=True, use_reloader=False)
