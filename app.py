@@ -336,17 +336,6 @@ def extract_and_log_symptoms(msg):
         if symptom in msg_lower:
             db_log_symptom(symptom)
 
-def extract_pdf_text(file_path):
-    try:
-        import pdfplumber
-        text_content = []
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text: text_content.append(page_text.strip())
-        return "\n".join(text_content) if text_content else None
-    except Exception: return None
-
 # 5. DATABASE SESSIONS DECORATOR
 def require_admin_session(f):
     @wraps(f)
@@ -713,7 +702,7 @@ def admin_kb_stats():
     conn.close()
 
     try:
-        collection_info = client.get_collection("medical_chatbot")
+        collection_info = client.get_collection(_COLLECTION_NAME)
         qdrant_count = collection_info.points_count
     except Exception:
         qdrant_count = 0
@@ -1354,10 +1343,17 @@ def register_blood_donor():
         return jsonify({"success": False, "message": "All fields are required."}), 400
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
-    c.execute(
-        "INSERT INTO blood_donors (name,phone,blood_group,city,is_available,created_at) VALUES (?,?,?,?,1,?)",
-        (name, phone, group, city, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
+    existing = c.execute("SELECT id FROM blood_donors WHERE phone=?", (phone,)).fetchone()
+    if existing:
+        c.execute(
+            "UPDATE blood_donors SET name=?, blood_group=?, city=?, is_available=1 WHERE id=?",
+            (name, group, city, existing[0])
+        )
+    else:
+        c.execute(
+            "INSERT INTO blood_donors (name,phone,blood_group,city,is_available,created_at) VALUES (?,?,?,?,1,?)",
+            (name, phone, group, city, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
     conn.commit()
     conn.close()
     return jsonify({"success": True, "message": f"Thank you {name}! You are registered as a {group} donor in {city}."})
@@ -1388,6 +1384,17 @@ def toggle_donor_availability(did):
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
     c.execute("UPDATE blood_donors SET is_available = CASE WHEN is_available=1 THEN 0 ELSE 1 END WHERE id=?", (did,))
+    conn.commit()
+    conn.close()
+    return jsonify({"success": True})
+
+
+@app.route("/admin/bloodbank/donors/<int:did>", methods=["DELETE"])
+@require_admin_session
+def delete_donor(did):
+    conn = sqlite3.connect(DB_PATH)
+    c    = conn.cursor()
+    c.execute("DELETE FROM blood_donors WHERE id=?", (did,))
     conn.commit()
     conn.close()
     return jsonify({"success": True})

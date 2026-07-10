@@ -7,6 +7,7 @@ __pycache__/
 curabot.db
 qdrant_db/
 static/uploads/
+static/prescriptions/
 .deepeval/
 research/eval/*_log*.txt
 research/eval/results.json

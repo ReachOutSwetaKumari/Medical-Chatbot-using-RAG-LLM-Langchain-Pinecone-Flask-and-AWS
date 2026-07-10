@@ -1132,6 +1132,9 @@
                 <button class="admin-tab-btn" id="tabBlood" onclick="switchAdminTab('blood')">
                     <i class="fa-solid fa-droplet me-2" style="color:#f87171;"></i>Blood Requests
                 </button>
+                <button class="admin-tab-btn" id="tabDonors" onclick="switchAdminTab('donors')">
+                    <i class="fa-solid fa-hand-holding-heart me-2" style="color:#f87171;"></i>Blood Donors
+                </button>
             </div>
 
             <!-- ── OVERVIEW TAB ── -->
@@ -1535,6 +1538,41 @@
                     </div>
                 </div>
             </div><!-- /adminBloodPanel -->
+
+            <!-- ── BLOOD DONORS TAB ── -->
+            <div id="adminDonorsPanel" style="display:none;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+                    <h5 class="admin-section-heading mb-0">
+                        <i class="fa-solid fa-hand-holding-heart me-2" style="color:#f87171;"></i>Registered Blood Donors
+                    </h5>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input type="text" class="svc-field" id="donorFilterGroup" placeholder="Blood group" style="width:120px;padding:5px 10px;font-size:0.8rem;">
+                        <input type="text" class="svc-field" id="donorFilterCity" placeholder="City" style="width:140px;padding:5px 10px;font-size:0.8rem;">
+                        <button class="btn btn-sm btn-outline-secondary" style="font-size:0.8rem;" onclick="adminLoadDonors()">
+                            <i class="fa-solid fa-magnifying-glass me-1"></i>Filter
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" style="font-size:0.8rem;" onclick="document.getElementById('donorFilterGroup').value='';document.getElementById('donorFilterCity').value='';adminLoadDonors()">
+                            <i class="fa-solid fa-rotate-right me-1"></i>Reset
+                        </button>
+                    </div>
+                </div>
+                <div class="svc-requests-card">
+                    <div style="overflow-x:auto;">
+                        <table class="svc-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th><th>Name</th><th>Phone</th>
+                                    <th>Group</th><th>City</th><th>Registered</th>
+                                    <th>Availability</th><th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminDonorsTableBody">
+                                <tr><td colspan="8" class="text-center text-muted py-4">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div><!-- /adminDonorsPanel -->
 
 
         </div>
@@ -2978,6 +3016,63 @@
         } catch(e) { alert('Network error.'); sel.value = ''; }
     }
 
+    // ── BLOOD DONORS MANAGEMENT ────────────────────────────────────────────────
+
+    async function adminLoadDonors() {
+        const tbody = document.getElementById('adminDonorsTableBody');
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Loading...</td></tr>';
+        const group = document.getElementById('donorFilterGroup').value.trim();
+        const city  = document.getElementById('donorFilterCity').value.trim();
+        const params = new URLSearchParams();
+        if (group) params.set('blood_group', group);
+        if (city)  params.set('city', city);
+        try {
+            const res  = await fetch(`/admin/bloodbank/donors?${params.toString()}`);
+            if (!res.ok) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Unauthorized.</td></tr>'; return; }
+            const data = await res.json();
+            if (!data.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No donors registered yet.</td></tr>'; return; }
+            tbody.innerHTML = data.map(d => `
+                <tr>
+                    <td>${d.id}</td>
+                    <td style="font-weight:600;">${d.name}</td>
+                    <td>${d.phone}</td>
+                    <td><span class="blood-chip">${d.blood_group}</span></td>
+                    <td>${d.city}</td>
+                    <td>${d.created_at || '—'}</td>
+                    <td>
+                        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.8rem;">
+                            <input type="checkbox" ${d.is_available ? 'checked' : ''} onchange="adminToggleDonor(${d.id})">
+                            <span class="svc-badge ${d.is_available ? 'badge-confirmed' : 'badge-cancelled'}">${d.is_available ? 'Available' : 'Unavailable'}</span>
+                        </label>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-danger" style="font-size:0.75rem;padding:2px 8px;" onclick="adminDeleteDonor(${d.id}, '${d.name.replace(/'/g, "\\'")}')">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>`).join('');
+        } catch(e) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Failed to load.</td></tr>'; }
+    }
+
+    async function adminToggleDonor(id) {
+        try {
+            const res = await fetch(`/admin/bloodbank/donors/${id}/toggle`, { method:'PATCH' });
+            const d   = await res.json();
+            if (d.success) adminLoadDonors();
+            else alert(d.message || 'Update failed.');
+        } catch(e) { alert('Network error.'); }
+    }
+
+    async function adminDeleteDonor(id, name) {
+        if (!confirm(`Remove ${name} from the donor list? This can't be undone.`)) return;
+        try {
+            const res = await fetch(`/admin/bloodbank/donors/${id}`, { method:'DELETE' });
+            const d   = await res.json();
+            if (d.success) adminLoadDonors();
+            else alert(d.message || 'Delete failed.');
+        } catch(e) { alert('Network error.'); }
+    }
+
     // 🔐 ADMIN SECURE PORTAL CONTROLS ENGINE
     function switchToAdminView(element) {
         document.getElementById('patientChatContainer').classList.add('d-none');
@@ -2992,17 +3087,17 @@
     }
 
     function switchAdminTab(tab) {
-        const panels = ['overview','kb','hospitals','appointments','blood'];
+        const panels = ['overview','kb','hospitals','appointments','blood','donors'];
         panels.forEach(p => {
             const panelId = {
                 overview:'adminOverviewPanel', kb:'adminKbPanel',
                 hospitals:'adminHospitalsPanel', appointments:'adminAppointmentsPanel',
-                blood:'adminBloodPanel'
+                blood:'adminBloodPanel', donors:'adminDonorsPanel'
             }[p];
             const btnId = {
                 overview:'tabOverview', kb:'tabKb',
                 hospitals:'tabHospitals', appointments:'tabAppointments',
-                blood:'tabBlood'
+                blood:'tabBlood', donors:'tabDonors'
             }[p];
             document.getElementById(panelId).style.display = (p === tab) ? '' : 'none';
             document.getElementById(btnId).classList.toggle('active', p === tab);
@@ -3012,6 +3107,7 @@
         else if (tab === 'hospitals') { adminLoadHospitals(); adminLoadDoctors(); adminRefreshHospitalDropdown(); }
         else if (tab === 'appointments') adminLoadAppointments();
         else if (tab === 'blood')    adminLoadBloodRequests();
+        else if (tab === 'donors')   adminLoadDonors();
     }
 
     function switchToChatView() {
@@ -3188,6 +3284,7 @@
                 alertEl.className = 'svc-alert success'; alertEl.textContent = data.message; alertEl.style.display = 'block';
                 ['donorName','donorPhone','donorCity'].forEach(id => document.getElementById(id).value = '');
                 document.getElementById('donorGroup').value = '';
+                setTimeout(() => { alertEl.style.display = 'none'; }, 4000);
             } else { throw new Error(data.message); }
         } catch(e) { alertEl.className = 'svc-alert error'; alertEl.textContent = e.message || 'Failed to register.'; alertEl.style.display = 'block'; }
     }
